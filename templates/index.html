@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Control</title>
+</head>
+<body>
+    <h1>Robot Control Panel</h1>
+    
+    <h2>Status: {{ status }}</h2>
+    <h3>Robot Command: {{ command }}</h3>
+    <p>Face Detected: {{ user_face_detected }}</p>
+    
+    <h3>Upload Image for Face Recognition</h3>
+    <form action="/upload_initial_image" method="post" enctype="multipart/form-data">
+        <input type="file" name="image" required>
+        <button type="submit">Upload Image</button>
+    </form>
+    
+    <h3>Set Sleep Mode</h3>
+    <form action="/set_sleep_mode" method="post">
+        <button type="submit">Toggle Sleep Mode</button>
+    </form>
+
+    <h3>Live Video Feed</h3>
+    <img src="data:image/jpeg;base64,{{ image_base64 }}" alt="Live feed">
+
+</body>
+</html>
