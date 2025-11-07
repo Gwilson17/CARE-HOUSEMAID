@@ -2,6 +2,7 @@ pip>=24.0
 setuptools>=70.0
 wheel
 mediapipe==0.10.20
+Werkzeug<3.0
 Flask==2.2.2
 opencv-python==4.5.5.64
 requests==2.28.1
