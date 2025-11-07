@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: care-housemaid
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn brain:app"
