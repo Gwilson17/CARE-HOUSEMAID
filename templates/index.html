@@ -4,27 +4,133 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Robot Control</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f4f7f8;
+            color: #333;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            text-shadow: 1px 1px 2px #aaa;
+        }
+        h2, h3 {
+            color: #34495e;
+        }
+        p {
+            font-size: 1.1em;
+        }
+        form {
+            margin: 20px 0;
+            padding: 15px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
+        }
+        input[type="file"] {
+            display: block;
+            margin: 10px 0;
+        }
+        button {
+            background-color: #3498db;
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 1em;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .live-feed {
+            display: block;
+            margin: 20px auto;
+            border-radius: 10px;
+            max-width: 100%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+        .live-feed:hover {
+            transform: scale(1.02);
+        }
+        .status-panel {
+            background: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .face-indicator {
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-left: 10px;
+        }
+        .face-true { background: #2ecc71; } /* green */
+        .face-false { background: #e74c3c; } /* red */
+        .sleep-mode-on { background-color: #f39c12; }
+        .sleep-mode-off { background-color: #3498db; }
+    </style>
+    <script>
+        function refreshLiveFeed() {
+            const img = document.getElementById('live-feed');
+            if (img) {
+                const timestamp = new Date().getTime();
+                img.src = `data:image/jpeg;base64,{{ image_base64 }}?t=${timestamp}`;
+            }
+        }
+        setInterval(refreshLiveFeed, 2000);
+
+        function toggleSleep(button) {
+            if (button.classList.contains('sleep-mode-on')) {
+                button.classList.remove('sleep-mode-on');
+                button.classList.add('sleep-mode-off');
+                button.innerText = 'Toggle Sleep Mode (OFF)';
+            } else {
+                button.classList.remove('sleep-mode-off');
+                button.classList.add('sleep-mode-on');
+                button.innerText = 'Toggle Sleep Mode (ON)';
+            }
+        }
+    </script>
 </head>
 <body>
     <h1>Robot Control Panel</h1>
-    
-    <h2>Status: {{ status }}</h2>
-    <h3>Robot Command: {{ command }}</h3>
-    <p>Face Detected: {{ user_face_detected }}</p>
-    
+
+    <div class="status-panel">
+        <div>
+            <h2>Status: {{ status }}</h2>
+            <h3>Robot Command: {{ command }}</h3>
+        </div>
+        <div>
+            <p>Face Detected: {{ user_face_detected }}
+                <span class="face-indicator {{ 'face-true' if user_face_detected else 'face-false' }}"></span>
+            </p>
+        </div>
+    </div>
+
     <h3>Upload Image for Face Recognition</h3>
     <form action="/upload_initial_image" method="post" enctype="multipart/form-data">
         <input type="file" name="image" required>
         <button type="submit">Upload Image</button>
     </form>
-    
+
     <h3>Set Sleep Mode</h3>
     <form action="/set_sleep_mode" method="post">
-        <button type="submit">Toggle Sleep Mode</button>
+        <button type="button" class="sleep-mode-off" onclick="toggleSleep(this)">Toggle Sleep Mode (OFF)</button>
     </form>
 
     <h3>Live Video Feed</h3>
-    <img src="data:image/jpeg;base64,{{ image_base64 }}" alt="Live feed">
-
+    <img id="live-feed" class="live-feed" src="data:image/jpeg;base64,{{ image_base64 }}" alt="Live feed">
 </body>
 </html>
