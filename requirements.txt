@@ -4,7 +4,6 @@ wheel
 mediapipe==0.10.20
 Flask==2.2.2
 opencv-python==4.5.5.64
-mediapipe==0.10.21
 requests==2.28.1
 numpy==1.23.4
 gunicorn==20.1.0
