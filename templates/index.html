@@ -30,9 +30,12 @@
             border-radius: 8px;
             box-shadow: 0px 4px 6px rgba(0,0,0,0.1);
         }
-        input[type="file"] {
+        input[type="file"], input[type="email"] {
             display: block;
             margin: 10px 0;
+            padding: 8px;
+            width: 100%;
+            box-sizing: border-box;
         }
         button {
             background-color: #3498db;
@@ -101,6 +104,9 @@
                 button.classList.add('sleep-mode-on');
                 button.innerText = 'Toggle Sleep Mode (ON)';
             }
+
+            // Send POST request to toggle sleep mode
+            fetch('/set_sleep_mode', { method: 'POST' });
         }
     </script>
 </head>
@@ -125,10 +131,14 @@
         <button type="submit">Upload Image</button>
     </form>
 
-    <h3>Set Sleep Mode</h3>
-    <form action="/set_sleep_mode" method="post">
-        <button type="button" class="sleep-mode-off" onclick="toggleSleep(this)">Toggle Sleep Mode (OFF)</button>
+    <h3>Set Alert Email</h3>
+    <form action="/set_email" method="post">
+        <input type="email" name="alert_email" placeholder="Enter alert email" required>
+        <button type="submit">Set Email</button>
     </form>
+
+    <h3>Set Sleep Mode</h3>
+    <button type="button" class="sleep-mode-off" onclick="toggleSleep(this)">Toggle Sleep Mode (OFF)</button>
 
     <h3>Live Video Feed</h3>
     <img id="live-feed" class="live-feed" src="data:image/jpeg;base64,{{ image_base64 }}" alt="Live feed">
