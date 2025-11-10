@@ -2,7 +2,7 @@ import time
 import cv2
 import numpy as np
 import mediapipe as mp
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template, redirect, url_for
 from datetime import datetime, timedelta
 import base64
 import threading
@@ -17,13 +17,12 @@ user_in_bed = False
 robot_command = "stop"
 user_face_detected = False
 user_image = None
-
 last_seen_time = datetime.now()
 alert_triggered = False
 
 # --- Email Config ---
 SENDER_EMAIL = "your_email@gmail.com"
-SENDER_PASSWORD = "your_app_password" # Use App Password for Gmail
+SENDER_PASSWORD = "your_app_password"  # Use App Password for Gmail
 RECIPIENT_EMAIL = "relative_email@gmail.com"
 
 # --- MediaPipe Setup ---
@@ -50,35 +49,40 @@ def send_email(subject, message):
 
 @app.route('/')
 def index():
-    """Dashboard route."""
+    """Render dashboard HTML."""
+    global latest_frame, robot_command, user_in_bed, user_face_detected
     status = "Sleeping" if user_in_bed else "Awake"
-    return f"Server active — Status: {status}, Command: {robot_command}, Face: {user_face_detected}"
-
+    image_base64 = None
+    if latest_frame is not None:
+        _, buf = cv2.imencode('.jpg', latest_frame)
+        image_base64 = base64.b64encode(buf).decode('utf-8')
+    return render_template('dashboard.html',
+                           status=status,
+                           command=robot_command,
+                           user_face_detected=user_face_detected,
+                           image_base64=image_base64)
 
 @app.route('/upload_initial_image', methods=['POST'])
 def upload_initial_image():
-    """Receive image from ESP32-CAM and analyze it."""
+    """Receive image from form and analyze it."""
     global latest_frame, user_face_detected, user_image, user_in_bed, robot_command, last_seen_time, alert_triggered
 
-    img_bytes = request.data
-    npimg = np.frombuffer(img_bytes, np.uint8)
+    if 'image' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files['image']
+    npimg = np.frombuffer(file.read(), np.uint8)
     frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
     latest_frame = frame
 
-    # Analyze frame
     analyze_frame(frame)
 
-    # Update last seen time if face detected
     if user_face_detected:
         last_seen_time = datetime.now()
         alert_triggered = False
         user_image = frame
-        response = {"status": "Face detected — robot following", "robot_command": robot_command}
-    else:
-        response = {"status": "No face detected — robot searching", "robot_command": robot_command}
 
-    return jsonify(response)
-
+    return redirect(url_for('index'))
 
 @app.route('/cmd', methods=['GET'])
 def get_command():
@@ -86,11 +90,10 @@ def get_command():
     global robot_command
     return jsonify({"command": robot_command})
 
-
 @app.route('/status', methods=['GET'])
 def get_status():
     """Return current status + image."""
-    global latest_frame, robot_command, user_in_bed
+    global latest_frame, robot_command, user_in_bed, user_face_detected
     status = "Sleeping" if user_in_bed else "Awake"
     image_base64 = None
 
@@ -101,9 +104,17 @@ def get_status():
     return jsonify({
         "status": status,
         "command": robot_command,
+        "user_face_detected": user_face_detected,
         "image_base64": image_base64,
         "timestamp": datetime.now().isoformat()
     })
+
+@app.route('/set_sleep_mode', methods=['POST'])
+def set_sleep_mode():
+    """Toggle sleep mode."""
+    global user_sleeping
+    user_sleeping = not user_sleeping
+    return ('', 204)  # No content
 
 # ------------------------- FRAME ANALYSIS -------------------------
 
