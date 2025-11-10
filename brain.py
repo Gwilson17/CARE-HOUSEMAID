@@ -19,11 +19,11 @@ user_face_detected = False
 user_image = None
 last_seen_time = datetime.now()
 alert_triggered = False
+RECIPIENT_EMAIL = None  # <- Dynamic email from user
 
 # --- Email Config ---
-SENDER_EMAIL = "your_email@gmail.com"
-SENDER_PASSWORD = "your_app_password"  # Use App Password for Gmail
-RECIPIENT_EMAIL = "relative_email@gmail.com"
+SENDER_EMAIL = "vaargv23@gmail.com"
+SENDER_PASSWORD = "Lp@170709"  # Use App Password for Gmail
 
 # --- MediaPipe Setup ---
 mp_pose = mp.solutions.pose
@@ -33,7 +33,10 @@ face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.2)
 
 # ------------------------- EMAIL ALERT FUNCTION -------------------------
 def send_email(subject, message):
-    """Send an email alert."""
+    """Send an email alert if recipient is set."""
+    if not RECIPIENT_EMAIL:
+        print("⚠️ No recipient email set. Skipping email.")
+        return
     try:
         server = smtplib.SMTP("smtp.gmail.com", 587)
         server.starttls()
@@ -41,12 +44,11 @@ def send_email(subject, message):
         body = f"Subject:{subject}\n\n{message}"
         server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, body)
         server.quit()
-        print(f"📧 Email sent: {subject}")
+        print(f"📧 Email sent: {subject} to {RECIPIENT_EMAIL}")
     except Exception as e:
         print("❌ Failed to send email:", e)
 
 # ------------------------- ROUTES -------------------------
-
 @app.route('/')
 def index():
     """Render dashboard HTML."""
@@ -96,11 +98,9 @@ def get_status():
     global latest_frame, robot_command, user_in_bed, user_face_detected
     status = "Sleeping" if user_in_bed else "Awake"
     image_base64 = None
-
     if latest_frame is not None:
         _, buf = cv2.imencode('.jpg', latest_frame)
         image_base64 = base64.b64encode(buf).decode('utf-8')
-
     return jsonify({
         "status": status,
         "command": robot_command,
@@ -116,8 +116,17 @@ def set_sleep_mode():
     user_sleeping = not user_sleeping
     return ('', 204)  # No content
 
-# ------------------------- FRAME ANALYSIS -------------------------
+@app.route('/set_email', methods=['POST'])
+def set_email():
+    """Set alert recipient email dynamically."""
+    global RECIPIENT_EMAIL
+    email = request.form.get('alert_email')
+    if email:
+        RECIPIENT_EMAIL = email
+        print(f"✅ Alert email set to: {RECIPIENT_EMAIL}")
+    return redirect(url_for('index'))
 
+# ------------------------- FRAME ANALYSIS -------------------------
 def analyze_frame(frame):
     """Detect face + posture (for fall)."""
     global user_in_bed, robot_command, user_face_detected
@@ -153,7 +162,6 @@ def analyze_frame(frame):
         robot_command = "search"
 
 # ------------------------- MISSING MONITOR -------------------------
-
 def monitor_missing_user():
     """Check if user has been missing for 20+ minutes."""
     global last_seen_time, alert_triggered
@@ -168,7 +176,6 @@ def monitor_missing_user():
         time.sleep(60)
 
 # ------------------------- MAIN -------------------------
-
 if __name__ == '__main__':
     threading.Thread(target=monitor_missing_user, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)
