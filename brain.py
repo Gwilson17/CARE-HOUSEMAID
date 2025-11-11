@@ -7,23 +7,56 @@ from datetime import datetime, timedelta
 import base64
 import threading
 import smtplib
+from email.message import EmailMessage
+import google.auth
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
 
 app = Flask(__name__)
 
 # --- Global Variables ---
 latest_frame = None
-user_sleeping = False       # Controlled by HTML toggle
+user_sleeping = False
 user_in_bed = False
 robot_command = "stop"
 user_face_detected = False
 user_image = None
 last_seen_time = datetime.now()
 alert_triggered = False
-RECIPIENT_EMAIL = None      # <- Dynamic email from user
+RECIPIENT_EMAIL = None  # Set dynamically
 
-# --- Email Config ---
-SENDER_EMAIL = "vaargv23@gmail.com"
-SENDER_PASSWORD = "Lp@170709"  # Use App Password for Gmail
+# --- OAuth2 Email Config ---
+SENDER_EMAIL = "your_email@gmail.com"  # Gmail account
+CREDENTIALS_FILE = "credentials.json"  # OAuth2 credentials JSON from Google Cloud
+
+def send_email_oauth2(subject, body):
+    """Send email via Gmail OAuth2."""
+    global RECIPIENT_EMAIL
+    if not RECIPIENT_EMAIL:
+        print("⚠️ No recipient email set. Skipping email.")
+        return
+    try:
+        creds = Credentials.from_authorized_user_file(CREDENTIALS_FILE, ["https://www.googleapis.com/auth/gmail.send"])
+        if creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        
+        msg = EmailMessage()
+        msg["Subject"] = subject
+        msg["From"] = SENDER_EMAIL
+        msg["To"] = RECIPIENT_EMAIL
+        msg.set_content(body)
+
+        import smtplib
+        smtp_conn = smtplib.SMTP("smtp.gmail.com", 587)
+        smtp_conn.ehlo()
+        smtp_conn.starttls()
+        smtp_conn.ehlo()
+        smtp_conn.login(SENDER_EMAIL, creds.token)
+        smtp_conn.send_message(msg)
+        smtp_conn.quit()
+        print(f"📧 Email sent via OAuth2: {subject} to {RECIPIENT_EMAIL}")
+    except Exception as e:
+        print("❌ Failed to send email via OAuth2:", e)
 
 # --- MediaPipe Setup ---
 mp_pose = mp.solutions.pose
@@ -31,27 +64,9 @@ mp_face_detection = mp.solutions.face_detection
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.2)
 
-# ------------------------- EMAIL ALERT FUNCTION -------------------------
-def send_email(subject, message):
-    """Send an email alert if recipient is set."""
-    if not RECIPIENT_EMAIL:
-        print("⚠️ No recipient email set. Skipping email.")
-        return
-    try:
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        body = f"Subject:{subject}\n\n{message}"
-        server.sendmail(SENDER_EMAIL, RECIPIENT_EMAIL, body)
-        server.quit()
-        print(f"📧 Email sent: {subject} to {RECIPIENT_EMAIL}")
-    except Exception as e:
-        print("❌ Failed to send email:", e)
-
 # ------------------------- ROUTES -------------------------
 @app.route('/')
 def index():
-    """Render dashboard HTML."""
     global latest_frame, robot_command, user_in_bed, user_face_detected
     status = "Sleeping" if user_in_bed else "Awake"
     image_base64 = None
@@ -66,7 +81,6 @@ def index():
 
 @app.route('/upload_initial_image', methods=['POST'])
 def upload_initial_image():
-    """Receive image from form and analyze it."""
     global latest_frame, user_face_detected, user_image, user_in_bed, robot_command, last_seen_time, alert_triggered
 
     if 'image' not in request.files:
@@ -88,13 +102,11 @@ def upload_initial_image():
 
 @app.route('/cmd', methods=['GET'])
 def get_command():
-    """Return current robot command."""
     global robot_command
     return jsonify({"command": robot_command})
 
 @app.route('/status', methods=['GET'])
 def get_status():
-    """Return current status + image."""
     global latest_frame, robot_command, user_in_bed, user_face_detected
     status = "Sleeping" if user_in_bed else "Awake"
     image_base64 = None
@@ -111,15 +123,13 @@ def get_status():
 
 @app.route('/set_sleep_mode', methods=['POST'])
 def set_sleep_mode():
-    """Toggle sleep mode."""
     global user_sleeping
     user_sleeping = not user_sleeping
     print(f"💤 Sleep mode set to: {user_sleeping}")
-    return ('', 204)  # No content
+    return ('', 204)
 
 @app.route('/set_email', methods=['POST'])
 def set_email():
-    """Set alert recipient email dynamically."""
     global RECIPIENT_EMAIL
     email = request.form.get('alert_email')
     if email:
@@ -129,7 +139,6 @@ def set_email():
 
 # ------------------------- FRAME ANALYSIS -------------------------
 def analyze_frame(frame):
-    """Detect face + posture (for fall)."""
     global user_in_bed, robot_command, user_face_detected
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -148,16 +157,14 @@ def analyze_frame(frame):
             lying_down = abs(left_shoulder.y - left_hip.y) < 0.05
 
             if lying_down and not user_sleeping:
-                # Only alert if the user is not supposed to be sleeping
                 user_in_bed = True
                 robot_command = "alert_fall"
                 print("⚠️ Fall detected!")
-                send_email(
+                send_email_oauth2(
                     "⚠️ Fall Detected",
                     "A fall has been detected. Please check on the user immediately."
                 )
             else:
-                # If sleeping, lying down is normal
                 user_in_bed = lying_down
         else:
             user_in_bed = False
@@ -168,13 +175,12 @@ def analyze_frame(frame):
 
 # ------------------------- MISSING MONITOR -------------------------
 def monitor_missing_user():
-    """Check if user has been missing for 20+ minutes."""
     global last_seen_time, alert_triggered
     while True:
         if not alert_triggered and (datetime.now() - last_seen_time) > timedelta(minutes=20):
             alert_triggered = True
             print("🚨 User missing for more than 20 minutes!")
-            send_email(
+            send_email_oauth2(
                 "🚨 User Missing Alert",
                 "The user has not been detected for over 20 minutes. Please check immediately."
             )
