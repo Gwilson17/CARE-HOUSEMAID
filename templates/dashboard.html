@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robot Control</title>
+    <title>Robot Control Panel</title>
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -42,7 +42,6 @@
             border: none;
             color: white;
             padding: 10px 20px;
-            text-align: center;
             font-size: 1em;
             border-radius: 5px;
             cursor: pointer;
@@ -89,13 +88,14 @@
             const img = document.getElementById('live-feed');
             if (img) {
                 const timestamp = new Date().getTime();
-                img.src = `data:image/jpeg;base64,{{ image_base64 }}?t=${timestamp}`;
+                img.src = `/live_feed?t=${timestamp}`;
             }
         }
         setInterval(refreshLiveFeed, 2000);
 
         function toggleSleep(button) {
-            if (button.classList.contains('sleep-mode-on')) {
+            const isOn = button.classList.contains('sleep-mode-on');
+            if (isOn) {
                 button.classList.remove('sleep-mode-on');
                 button.classList.add('sleep-mode-off');
                 button.innerText = 'Toggle Sleep Mode (OFF)';
@@ -106,13 +106,22 @@
             }
 
             // Send POST request to toggle sleep mode
-            fetch('/set_sleep_mode', { method: 'POST' });
+            fetch('/set_sleep_mode', { method: 'POST' })
+                .then(res => console.log('Sleep mode toggled'))
+                .catch(err => console.error(err));
+        }
+
+        function sendCommand(command) {
+            fetch(`/set_command/${command}`, { method: 'POST' })
+                .then(res => console.log(`Command sent: ${command}`))
+                .catch(err => console.error(err));
         }
     </script>
 </head>
 <body>
     <h1>Robot Control Panel</h1>
 
+    <!-- Status Panel -->
     <div class="status-panel">
         <div>
             <h2>Status: {{ status }}</h2>
@@ -125,22 +134,35 @@
         </div>
     </div>
 
+    <!-- Upload Image -->
     <h3>Upload Image for Face Recognition</h3>
     <form action="/upload_initial_image" method="post" enctype="multipart/form-data">
         <input type="file" name="image" required>
         <button type="submit">Upload Image</button>
     </form>
 
+    <!-- Set Alert Email -->
     <h3>Set Alert Email</h3>
     <form action="/set_email" method="post">
         <input type="email" name="alert_email" placeholder="Enter alert email" required>
         <button type="submit">Set Email</button>
     </form>
 
+    <!-- Sleep Mode Toggle -->
     <h3>Set Sleep Mode</h3>
     <button type="button" class="sleep-mode-off" onclick="toggleSleep(this)">Toggle Sleep Mode (OFF)</button>
 
+    <!-- Robot Command Buttons -->
+    <h3>Control Robot</h3>
+    <div>
+        <button onclick="sendCommand('follow')">Follow</button>
+        <button onclick="sendCommand('search')">Search</button>
+        <button onclick="sendCommand('alert_fall')">Alert Fall</button>
+        <button onclick="sendCommand('stop')">Stop</button>
+    </div>
+
+    <!-- Live Video Feed -->
     <h3>Live Video Feed</h3>
-    <img id="live-feed" class="live-feed" src="data:image/jpeg;base64,{{ image_base64 }}" alt="Live feed">
+    <img id="live-feed" class="live-feed" src="/live_feed" alt="Live feed">
 </body>
 </html>
