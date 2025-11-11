@@ -12,14 +12,14 @@ app = Flask(__name__)
 
 # --- Global Variables ---
 latest_frame = None
-user_sleeping = False
+user_sleeping = False       # Controlled by HTML toggle
 user_in_bed = False
 robot_command = "stop"
 user_face_detected = False
 user_image = None
 last_seen_time = datetime.now()
 alert_triggered = False
-RECIPIENT_EMAIL = None  # <- Dynamic email from user
+RECIPIENT_EMAIL = None      # <- Dynamic email from user
 
 # --- Email Config ---
 SENDER_EMAIL = "vaargv23@gmail.com"
@@ -114,6 +114,7 @@ def set_sleep_mode():
     """Toggle sleep mode."""
     global user_sleeping
     user_sleeping = not user_sleeping
+    print(f"💤 Sleep mode set to: {user_sleeping}")
     return ('', 204)  # No content
 
 @app.route('/set_email', methods=['POST'])
@@ -144,8 +145,10 @@ def analyze_frame(frame):
             left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
             left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
 
-            # Fall detection
-            if abs(left_shoulder.y - left_hip.y) < 0.05:
+            lying_down = abs(left_shoulder.y - left_hip.y) < 0.05
+
+            if lying_down and not user_sleeping:
+                # Only alert if the user is not supposed to be sleeping
                 user_in_bed = True
                 robot_command = "alert_fall"
                 print("⚠️ Fall detected!")
@@ -154,11 +157,13 @@ def analyze_frame(frame):
                     "A fall has been detected. Please check on the user immediately."
                 )
             else:
-                user_in_bed = False
+                # If sleeping, lying down is normal
+                user_in_bed = lying_down
         else:
             user_in_bed = False
     else:
         user_face_detected = False
+        user_in_bed = False
         robot_command = "search"
 
 # ------------------------- MISSING MONITOR -------------------------
