@@ -6,13 +6,14 @@ from flask import Flask, request, jsonify, render_template, redirect, url_for
 from datetime import datetime, timedelta
 import base64
 import threading
+import smtplib
 from email.message import EmailMessage
-from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 
 app = Flask(__name__)
 
-# ---------------- GLOBAL STATE ----------------
+# --- Global Variables ---
 latest_frame = None
 user_sleeping = False
 user_in_bed = False
@@ -21,20 +22,23 @@ user_face_detected = False
 user_image = None
 last_seen_time = datetime.now()
 alert_triggered = False
-RECIPIENT_EMAIL = None  # Set via web UI
+RECIPIENT_EMAIL = None  # Set dynamically
+user_x_pos = 0.5  # Horizontal center position (0=left, 1=right)
 
-# ---------------- EMAIL CONFIG ----------------
-SENDER_EMAIL = "your_email@gmail.com"  # Change to your Gmail
+# --- OAuth2 Email Config ---
+SENDER_EMAIL = "your_email@gmail.com"  # Gmail account
 CREDENTIALS_FILE = "credentials.json"  # OAuth2 credentials JSON
 
 def send_email_oauth2(subject, body):
-    """Send email using Gmail OAuth2 credentials."""
+    """Send email via Gmail OAuth2."""
     global RECIPIENT_EMAIL
     if not RECIPIENT_EMAIL:
         print("⚠️ No recipient email set. Skipping email.")
         return
     try:
-        creds = Credentials.from_authorized_user_file(CREDENTIALS_FILE, ["https://www.googleapis.com/auth/gmail.send"])
+        creds = Credentials.from_authorized_user_file(
+            CREDENTIALS_FILE, ["https://www.googleapis.com/auth/gmail.send"]
+        )
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
 
@@ -44,24 +48,24 @@ def send_email_oauth2(subject, body):
         msg["To"] = RECIPIENT_EMAIL
         msg.set_content(body)
 
-        import smtplib
         smtp_conn = smtplib.SMTP("smtp.gmail.com", 587)
         smtp_conn.ehlo()
         smtp_conn.starttls()
+        smtp_conn.ehlo()
         smtp_conn.login(SENDER_EMAIL, creds.token)
         smtp_conn.send_message(msg)
         smtp_conn.quit()
-        print(f"📧 Email sent to {RECIPIENT_EMAIL}: {subject}")
+        print(f"📧 Email sent via OAuth2: {subject} to {RECIPIENT_EMAIL}")
     except Exception as e:
-        print("❌ Email send failed:", e)
+        print("❌ Failed to send email via OAuth2:", e)
 
-# ---------------- MEDIAPIPE SETUP ----------------
+# --- MediaPipe Setup ---
 mp_pose = mp.solutions.pose
 mp_face_detection = mp.solutions.face_detection
 pose = mp_pose.Pose(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.2)
 
-# ---------------- ROUTES ----------------
+# ------------------------- ROUTES -------------------------
 @app.route('/')
 def index():
     global latest_frame, robot_command, user_in_bed, user_face_detected
@@ -70,11 +74,13 @@ def index():
     if latest_frame is not None:
         _, buf = cv2.imencode('.jpg', latest_frame)
         image_base64 = base64.b64encode(buf).decode('utf-8')
-    return render_template('dashboard.html',
-                           status=status,
-                           command=robot_command,
-                           user_face_detected=user_face_detected,
-                           image_base64=image_base64)
+    return render_template(
+        'dashboard.html',
+        status=status,
+        command=robot_command,
+        user_face_detected=user_face_detected,
+        image_base64=image_base64
+    )
 
 @app.route('/upload_initial_image', methods=['POST'])
 def upload_initial_image():
@@ -90,7 +96,7 @@ def upload_initial_image():
 
     analyze_frame(frame)
 
-    if user_face_detected or robot_command == "follow":
+    if user_face_detected:
         last_seen_time = datetime.now()
         alert_triggered = False
         user_image = frame
@@ -99,8 +105,11 @@ def upload_initial_image():
 
 @app.route('/cmd', methods=['GET'])
 def get_command():
-    global robot_command
-    return jsonify({"command": robot_command})
+    global robot_command, user_x_pos
+    return jsonify({
+        "command": robot_command,
+        "x_pos": user_x_pos  # 0 = left, 0.5 = center, 1 = right
+    })
 
 @app.route('/status', methods=['GET'])
 def get_status():
@@ -118,6 +127,13 @@ def get_status():
         "timestamp": datetime.now().isoformat()
     })
 
+@app.route('/set_sleep_mode', methods=['POST'])
+def set_sleep_mode():
+    global user_sleeping
+    user_sleeping = not user_sleeping
+    print(f"💤 Sleep mode set to: {user_sleeping}")
+    return ('', 204)
+
 @app.route('/set_email', methods=['POST'])
 def set_email():
     global RECIPIENT_EMAIL
@@ -127,57 +143,51 @@ def set_email():
         print(f"✅ Alert email set to: {RECIPIENT_EMAIL}")
     return redirect(url_for('index'))
 
-# ---------------- FRAME ANALYSIS ----------------
+# ------------------------- FRAME ANALYSIS -------------------------
 def analyze_frame(frame):
-    global user_in_bed, robot_command, user_face_detected
+    global user_in_bed, robot_command, user_face_detected, user_x_pos, user_sleeping
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     face_results = face_detection.process(rgb_frame)
     pose_results = pose.process(rgb_frame)
 
-    body_detected = False
+    user_x_pos = 0.5  # default center
     user_face_detected = False
+    body_detected = False
 
     if pose_results.pose_landmarks:
         body_detected = True
         landmarks = pose_results.pose_landmarks.landmark
-
         left_shoulder = landmarks[mp_pose.PoseLandmark.LEFT_SHOULDER.value]
         right_shoulder = landmarks[mp_pose.PoseLandmark.RIGHT_SHOULDER.value]
         left_hip = landmarks[mp_pose.PoseLandmark.LEFT_HIP.value]
-        right_hip = landmarks[mp_pose.PoseLandmark.RIGHT_HIP.value]
 
+        # Calculate horizontal center
+        user_x_pos = (left_shoulder.x + right_shoulder.x) / 2
+
+        # Check if lying down
         lying_down = abs(left_shoulder.y - left_hip.y) < 0.05
-        shoulder_width = abs(left_shoulder.x - right_shoulder.x)
-
-        # Fall detection
         if lying_down and not user_sleeping:
             user_in_bed = True
             robot_command = "alert_fall"
             print("⚠️ Fall detected!")
             send_email_oauth2(
                 "⚠️ Fall Detected",
-                "A fall has been detected. Please check on the user immediately."
+                "A fall has been detected. Please check immediately."
             )
         else:
             user_in_bed = False
+        robot_command = "follow"
 
-        # Orientation detection — if shoulders visible, person exists even if turned
-        if shoulder_width > 0.02:
-            robot_command = "follow"
-
-    # Face detection
     if face_results.detections:
         user_face_detected = True
         robot_command = "follow"
-    else:
-        user_face_detected = False
 
     if not body_detected and not user_face_detected:
         robot_command = "search"
         user_in_bed = False
 
-# ---------------- USER MISSING ALERT ----------------
+# ------------------------- MONITOR MISSING USER -------------------------
 def monitor_missing_user():
     global last_seen_time, alert_triggered
     while True:
@@ -190,8 +200,7 @@ def monitor_missing_user():
             )
         time.sleep(60)
 
-# ---------------- MAIN ----------------
+# ------------------------- MAIN -------------------------
 if __name__ == '__main__':
     threading.Thread(target=monitor_missing_user, daemon=True).start()
-    print("🚀 Care-Robot AI Flask server started on port 5000")
     app.run(host='0.0.0.0', port=5000)
