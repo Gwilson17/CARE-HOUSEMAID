@@ -33,7 +33,6 @@ face_detection = mp_face_detection.FaceDetection(min_detection_confidence=0.2)
 
 # ------------------------- GOOGLE OAUTH2 CONFIG -------------------------
 SENDER_EMAIL = "your_email@gmail.com"        # Gmail account
-CREDENTIALS_FILE = "credentials.json"       # OAuth2 credentials
 TOKEN_FILE = "token.json"                   # OAuth2 token file
 
 def send_email_oauth2(subject, body):
@@ -54,13 +53,13 @@ def send_email_oauth2(subject, body):
         msg.set_content(body)
 
         # Gmail SMTP using OAuth2 token
-        smtp_conn = smtplib.SMTP("smtp.gmail.com", 587)
-        smtp_conn.ehlo()
-        smtp_conn.starttls()
-        smtp_conn.ehlo()
-        smtp_conn.login(SENDER_EMAIL, creds.token)
-        smtp_conn.send_message(msg)
-        smtp_conn.quit()
+        with smtplib.SMTP("smtp.gmail.com", 587) as smtp_conn:
+            smtp_conn.ehlo()
+            smtp_conn.starttls()
+            smtp_conn.ehlo()
+            smtp_conn.login(SENDER_EMAIL, creds.token)
+            smtp_conn.send_message(msg)
+
         print(f"📧 Email sent via OAuth2: {subject} to {alert_email}")
     except Exception as e:
         print("❌ Failed to send email via OAuth2:", e)
@@ -78,14 +77,17 @@ def index():
 
 @app.route('/upload_initial_image', methods=['POST'])
 def upload_initial_image():
+    """Accept raw JPEG bytes from ESP32-CAM"""
     global latest_frame
-    if 'image' not in request.files:
-        return "No image uploaded", 400
-    file = request.files['image']
-    npimg = np.frombuffer(file.read(), np.uint8)
-    latest_frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-    analyze_frame(latest_frame)
-    return redirect(url_for('index'))
+    if not request.data:
+        return "No image received", 400
+    npimg = np.frombuffer(request.data, np.uint8)
+    frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+    if frame is None:
+        return "Failed to decode image", 400
+    latest_frame = frame
+    analyze_frame(frame)
+    return jsonify({"status": "ok"})
 
 @app.route('/set_email', methods=['POST'])
 def set_email():
@@ -112,11 +114,17 @@ def set_command(command):
 
 @app.route('/live_feed')
 def live_feed():
-    global latest_frame
-    if latest_frame is None:
-        return "No video feed", 404
-    _, jpeg = cv2.imencode('.jpg', latest_frame)
-    return Response(jpeg.tobytes(), mimetype='image/jpeg')
+    """MJPEG stream"""
+    def generate():
+        global latest_frame
+        while True:
+            if latest_frame is not None:
+                _, jpeg = cv2.imencode('.jpg', latest_frame)
+                frame_bytes = jpeg.tobytes()
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+            time.sleep(0.05)
+    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/cmd', methods=['GET'])
 def get_command():
@@ -151,7 +159,7 @@ def analyze_frame(frame):
         if lying_down:
             user_in_bed = True
             robot_command = "alert_fall"
-            send_email_oauth2("⚠️ Fall Detected", "A fall has been detected. Please check immediately.")
+            threading.Thread(target=send_email_oauth2, args=("⚠️ Fall Detected", "A fall has been detected. Please check immediately."), daemon=True).start()
         else:
             user_in_bed = False
             robot_command = "follow"
@@ -172,7 +180,7 @@ def monitor_missing_user():
         if not alert_triggered and (datetime.now() - last_seen_time) > timedelta(minutes=20):
             alert_triggered = True
             print("🚨 User missing for 20+ minutes!")
-            send_email_oauth2("🚨 User Missing Alert", "The user has not been detected for over 20 minutes. Please check immediately.")
+            threading.Thread(target=send_email_oauth2, args=("🚨 User Missing Alert", "The user has not been detected for over 20 minutes. Please check immediately."), daemon=True).start()
         time.sleep(60)
 
 # ------------------------- MAIN -------------------------
